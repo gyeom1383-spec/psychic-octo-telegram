@@ -136,37 +136,87 @@ FEEDBACK_SCHEMA = {
 # 3. Gemini 호출
 # ─────────────────────────────────────────────
 @st.cache_resource
-def get_ai_client():
-    if "GEMINI_API_KEY" not in st.secrets:
-        raise RuntimeError("Secrets에 GEMINI_API_KEY가 없습니다. 이름과 따옴표를 확인하세요.")
-    return genai.Client(api_key=str(st.secrets["GEMINI_API_KEY"]).strip())
+def get_api_keys():
+    if "GEMINI_API_KEYS" in st.secrets:
+        keys = list(st.secrets["GEMINI_API_KEYS"])
+        if keys:
+            return keys
+    keys = []
+    i = 1
+    while True:
+        key_name = f"GEMINI_API_KEY_{i}"
+        if key_name in st.secrets:
+            keys.append(st.secrets[key_name])
+            i += 1
+        else:
+            break
+    if not keys and "GEMINI_API_KEY" in st.secrets:
+        return [st.secrets["GEMINI_API_KEY"]]
+    return keys
 
+# 학생에게 보여줄 친절한 안내 문구로 감싸기 위한 예외 클래스
+class FriendlyAIError(Exception):
+    """AI 호출 실패 시 학생에게 보여줄 안내 문구를 담는 예외."""
+    pass
 
-def model_candidates():
-    first = st.secrets.get("GEMINI_MODEL", "")
-    return ([first] if first else []) + [m for m in DEFAULT_MODELS if m != first]
+def ai_call(prompt: str):
+    import time
+    keys = get_api_keys()
 
+    if not keys:
+        raise FriendlyAIError(
+            "AI 연결 설정에 문제가 있습니다. 선생님께 알려 주세요."
+        )
 
-def get_feedback(task_key: str, student_text: str, used: list[int]) -> dict:
-    """학번은 AI에 보내지 않고, 글과 자료 번호만 보냅니다."""
-    client = get_ai_client()
-    user_msg = (f"사용했다고 표시한 자료 번호: {used if used else '표시 안 함'}\n"
-                f"<학생 글>\n{student_text}\n</학생 글>")
-    config = types.GenerateContentConfig(
-        system_instruction=COMMON_RULES + TASK_PROMPTS[task_key],
-        response_mime_type="application/json",
-        response_schema=FEEDBACK_SCHEMA,
-        temperature=0.3,
-    )
-    errors = []
-    for model in model_candidates():
-        try:
-            resp = client.models.generate_content(model=model, contents=user_msg, config=config)
-            return json.loads(resp.text)
-        except Exception as e:
-            errors.append(f"[{model}] {type(e).__name__}: {str(e)[:300]}")
-            print("Gemini 오류", errors[-1], flush=True)  # Manage app → 로그에서 확인 가능
-    raise RuntimeError("\n".join(errors))
+    server_error_occurred = False  # 500/503 등 서버 오류가 한 번이라도 났는지
+
+    for idx, key in enumerate(keys):
+        # 같은 키로 서버 오류(500/503/overloaded) 시 최대 3회까지 재시도
+        for attempt in range(3):
+            try:
+                client = OpenAI(
+                    api_key=key,
+                    base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+                )
+                resp = client.chat.completions.create(
+                    model="gemini-2.5-flash",
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=8192,
+                    temperature=0.3,
+                    stream=False,
+                )
+                return resp.choices[0].message.content, idx + 1, len(keys)
+            except Exception as e:
+                msg = str(e)
+                # 429(할당량 초과): 재시도하지 말고 다음 키로 전환
+                if "429" in msg:
+                    break
+                # 500/503/일시적 과부하: 잠시 기다렸다 같은 키로 재시도
+                if any(code in msg for code in ["500", "503", "502", "overloaded",
+                                                "InternalServerError", "Internal Server"]):
+                    server_error_occurred = True
+                    if attempt < 2:
+                        time.sleep(2)
+                        continue
+                    else:
+                        break  # 이 키로는 재시도 소진 → 다음 키 시도
+                # 그 밖의 오류: 더 시도하지 않고 친절한 안내로 종료
+                raise FriendlyAIError(
+                    "AI 피드백을 불러오는 중 문제가 발생했습니다.\n"
+                    "잠시 후 버튼을 한 번 더 눌러 주십시오."
+                )
+
+    # 여기까지 왔다면 모든 키가 실패한 상태
+    if server_error_occurred:
+        raise FriendlyAIError(
+            "지금 AI 서버가 혼잡하여 응답하지 못했습니다.\n"
+            "잠시 후 버튼을 한 번 더 눌러 주십시오."
+        )
+    else:
+        raise FriendlyAIError(
+            "오늘 사용할 수 있는 AI 피드백 횟수를 모두 사용했습니다.\n"
+            "잠시 후 다시 시도하거나 선생님께 알려 주세요."
+        )
 
 # ─────────────────────────────────────────────
 # 4. 구글 스프레드시트 저장·읽기
