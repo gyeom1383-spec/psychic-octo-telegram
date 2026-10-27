@@ -477,14 +477,28 @@ def show_feedback(task_key: str, fb: dict):
         st.markdown(f"**🤔 생각해 볼 질문**  \n{fb['question']}")
 
 
+def _remember_draft(task_key: str):
+    """화면이 다시 실행되어도 학생 글이 사라지지 않도록 초안을 별도로 보관합니다."""
+    text_key = f"{task_key}_text"
+    draft_key = f"{task_key}_draft"
+    st.session_state[draft_key] = st.session_state.get(text_key, "")
+
+
 def _start_feedback(task_key: str):
-    """버튼을 누르면 먼저 '처리 중' 상태로 바꿔, 다음 화면에서 버튼이 바로 잠기게 합니다."""
+    """버튼을 누른 순간의 글을 보존하고 피드백 처리 상태로 전환합니다."""
+    _remember_draft(task_key)
+    st.session_state[f"{task_key}_submitted_text"] = st.session_state.get(
+        f"{task_key}_draft", "")
     st.session_state["busy"] = task_key
     st.session_state.pop(f"{task_key}_msg", None)
 
 
 def _run_feedback(task_key: str):
-    text = st.session_state.get(f"{task_key}_text", "")
+    # 처리 도중 학생이 글을 수정하더라도 버튼을 누른 시점의 글을 평가·저장합니다.
+    text = st.session_state.get(
+        f"{task_key}_submitted_text",
+        st.session_state.get(f"{task_key}_draft", ""),
+    )
     wait = COOLDOWN_SEC - (time.time() - st.session_state.get("last_call", 0))
     if len(text.strip()) < 30:
         st.session_state[f"{task_key}_msg"] = ("error", "글을 조금 더 써 주세요. (30자 이상)", None)
@@ -531,8 +545,22 @@ def process_pending_feedback():
 
 def writing_area(task_key: str, placeholder: str):
     busy = st.session_state.get("busy")
-    st.text_area("나의 글", key=f"{task_key}_text", height=220, max_chars=MAX_CHARS,
-                 placeholder=placeholder, disabled=bool(busy))
+    text_key = f"{task_key}_text"
+    draft_key = f"{task_key}_draft"
+
+    # Streamlit이 버튼 클릭으로 화면 전체를 다시 실행하더라도 저장한 초안을 복원합니다.
+    if text_key not in st.session_state:
+        st.session_state[text_key] = st.session_state.get(draft_key, "")
+
+    st.text_area(
+        "나의 글",
+        key=text_key,
+        height=220,
+        max_chars=MAX_CHARS,
+        placeholder=placeholder,
+        on_change=_remember_draft,
+        args=(task_key,),
+    )
     label = "⏳ 피드백을 만드는 중이에요..." if busy == task_key else "피드백 받기"
     st.button(label, key=f"{task_key}_btn", type="primary", width="stretch",
               disabled=bool(busy), on_click=_start_feedback, args=(task_key,))
@@ -675,3 +703,4 @@ elif role == "teacher":
     teacher_page()
 else:
     login_page()
+
