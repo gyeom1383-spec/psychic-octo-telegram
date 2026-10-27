@@ -675,4 +675,3 @@ elif role == "teacher":
     teacher_page()
 else:
     login_page()
-
