@@ -282,15 +282,16 @@ def get_feedback(task_key: str, student_text: str) -> dict:
         )
 
     user_msg = f"<학생 글>\n{student_text.strip()}\n</학생 글>"
-config = types.GenerateContentConfig(
-    system_instruction=COMMON_RULES + TASK_PROMPTS[task_key],
-    response_mime_type="application/json",
-    response_json_schema=feedback_schema(task_key),
-    max_output_tokens=1536,
-    thinking_config=types.ThinkingConfig(
-        thinking_level="low"
-    ),
-)
+    config = types.GenerateContentConfig(
+        system_instruction=COMMON_RULES + TASK_PROMPTS[task_key],
+        response_mime_type="application/json",
+        response_json_schema=feedback_schema(task_key),
+        max_output_tokens=1536,
+        thinking_config=types.ThinkingConfig(
+            thinking_level="low"
+        ),
+    )
+
     errors = []
     for model in model_candidates():
         model_unavailable = False
