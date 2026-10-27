@@ -19,7 +19,8 @@ from google.genai import types
 # ─────────────────────────────────────────────
 # 1. 기본 설정
 # ─────────────────────────────────────────────
-st.set_page_config(page_title="주장하는 글쓰기 연습 ⑥", page_icon="✏️", layout="centered")
+st.set_page_config(page_title="주장하는 글쓰기 연습 ⑥", page_icon="✏️",
+                   layout="wide" if st.session_state.get("role") == "teacher" else "centered")
 
 # 먼저 시도할 모델 순서 (앞의 모델이 안 되면 다음 모델 사용)
 # Secrets에 GEMINI_MODEL 을 적으면 그 모델을 가장 먼저 사용합니다.
@@ -147,6 +148,7 @@ COMMON_RULES = f"""
 - 학생 대신 글을 고쳐 써 주지 않는다. 학생이 그대로 베껴 쓸 수 있는 완성된 문장을 따옴표로 주지 않는다.
   나쁜 예: "마지막에 '따라서 쉬는 시간을 15분으로 늘려야 한다.'라는 문장을 더해 보세요."
   좋은 예: "근거를 쓴 뒤, 그 자료가 왜 이유를 뒷받침하는지 한 문장으로 풀어 써 보세요."
+  이 규칙은 add_point(더 써 볼 점)에도 똑같이 적용한다. 덧붙일 문장을 따옴표로 만들어 주지 말고, 무엇에 대해 쓰면 되는지만 말한다.
 - 자료 5·6처럼 쓸 수 없는 자료를 근거로 썼다면 '근거' 항목을 ×로 하고 그 까닭을 알려 준다.
 - 모호한 표현(어느 정도, 적당히), 단정적 표현(반드시, 절대로), 주관적 표현(제 생각에, ~것 같다)이 있으면 '표현' 항목에서 그 낱말을 짚어 준다.
 - 학생 글이 주제와 상관없거나 장난, 욕설, 개인 정보가 있으면 on_topic을 false로 하고, 모든 항목을 ×로 하며, improve_points에 다시 쓰도록 정중하게 안내한다. (이때도 add_point와 question은 채운다.)
@@ -301,6 +303,8 @@ def _parse_feedback_response(response, task_key: str) -> dict:
     for p in parsed.get("improve_points") or []:
         if isinstance(p, dict):
             item = {k: str(p.get(k, "")).strip() for k in ("what", "why", "how", "frame", "example")}
+            if re.search(r"쉬는\s*시간", item["example"]):
+                item["example"] = ""   # 그대로 베껴 쓸 수 있는 예시는 보여 주지 않습니다.
             if item["what"] and item["why"] and item["how"]:
                 improve.append(item)
         elif str(p).strip():   # 예전 형식(문장 하나)도 받아 줍니다.
@@ -439,8 +443,20 @@ def save_record(student_id: str, task_key: str, text: str, fb: dict):
         fb.get("add_point", ""),
         fb.get("question", ""),
     ]
-    get_worksheet().append_row(row, value_input_option="RAW")
+    # table_range="A1": 구글 시트가 '표의 끝'을 잘못 찾아 한 칸 오른쪽에 붙이는 일을 막습니다.
+    get_worksheet().append_row(row, value_input_option="RAW", table_range="A1")
     load_records.clear()  # 교사 화면이 새 기록을 바로 볼 수 있게
+
+
+_TIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
+
+
+def _fix_shifted(row: list) -> list:
+    """예전에 오른쪽으로 밀려 저장된 줄(A열이 비고 B열에 제출 시각)을 제자리로 당겨 읽습니다."""
+    row = list(row)
+    while row and row[0] == "" and len(row) > 1 and _TIME_RE.match(row[1] or ""):
+        row = row[1:] + [""]
+    return row
 
 
 @st.cache_data(ttl=30, show_spinner=False)
@@ -448,7 +464,10 @@ def load_records() -> pd.DataFrame:
     values = get_worksheet().get_all_values()
     if len(values) <= 1:
         return pd.DataFrame(columns=HEADER)
-    df = pd.DataFrame(values[1:], columns=values[0])
+    cols = values[0]
+    n = len(cols)
+    rows = [(_fix_shifted(r) + [""] * n)[:n] for r in values[1:]]   # 칸 수를 제목 줄에 맞춤
+    df = pd.DataFrame(rows, columns=cols)
     df["학번"] = df["학번"].astype(str)
     return df
 
@@ -701,22 +720,161 @@ def student_page():
         if mine is not None:
             if mine.empty:
                 st.write("아직 저장된 글이 없어요.")
+            st.markdown(RECORD_CSS, unsafe_allow_html=True)
             for _, r in mine.iloc[::-1].iterrows():
-                with st.expander(f"{r['제출 시각']} · {r['과제']}"):
-                    st.markdown(f"**내 글**\n\n{r['학생 글']}")
-                    st.markdown(f"**점검 결과** {r['점검 결과']}")
-                    st.markdown(f"**잘한 점**\n\n{r['잘한 점']}")
-                    st.markdown(f"**고쳐 볼 점**\n\n{r['고쳐 볼 점']}")
-                    if r.get("더 써 볼 점"):
-                        st.markdown(f"**더 써 볼 점**\n\n{r['더 써 볼 점']}")
-                    if r.get("생각해 볼 질문"):
-                        st.markdown(f"**생각해 볼 질문**\n\n{r['생각해 볼 질문']}")
+                summary = mark_summary(parse_checks(r.get("점검 결과", "")))
+                with st.expander(f"{str(r['제출 시각'])[5:16]} · {r['과제']}   {summary}"):
+                    st.markdown(record_html(r, show_help=True), unsafe_allow_html=True)
 
     process_pending_feedback()
 
 # ─────────────────────────────────────────────
-# 7. 교사 화면
+# 7. 기록 보기 화면 (교사 화면 · 학생 '내 기록' 공용)
 # ─────────────────────────────────────────────
+MARK_STYLE = {"○": ("#E6F4EA", "#1E7B34"), "△": ("#FFF4D6", "#9A6700"), "×": ("#FDE7E7", "#B42318")}
+OLD_MARK = {"잘함": "○", "보완": "△", "없음": "×"}
+TAGS = {"무엇을": "what", "왜": "why", "어떻게": "how", "문장 틀": "frame", "다른 주제 예시": "example"}
+
+RECORD_CSS = """
+<style>
+.rc{font-size:0.95rem;line-height:1.65}
+.rc .grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:18px}
+@media (max-width: 900px){.rc .grid{grid-template-columns:1fr}}
+.rc .lab{font-size:0.78rem;font-weight:700;color:#666;letter-spacing:.02em;margin:0 0 4px}
+.rc .txt{background:#FAFAF7;border:1px solid #E4E2DA;border-radius:10px;padding:12px 14px;white-space:pre-wrap}
+.rc .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.rc .chip{border-radius:99px;padding:2px 10px;font-size:0.85rem;font-weight:700;white-space:nowrap}
+.rc .box{border-radius:10px;padding:9px 13px;margin-bottom:10px}
+.rc .good{background:#E6F4EA;border-left:5px solid #1E7B34}
+.rc .imp{background:#FFFBEA;border-left:5px solid #E0A800}
+.rc .add{background:#EAF2FF;border-left:5px solid #2B5FD9}
+.rc .q{background:#F3EEFF;border-left:5px solid #6B3FD4}
+.rc .ip + .ip{border-top:1px dashed #E5CF80;padding-top:7px;margin-top:7px}
+.rc .row{display:grid;grid-template-columns:3.6em 1fr;gap:6px}
+.rc .row b{color:#7A5B00}
+.rc .help{font-size:0.82rem;color:#666}
+.mxw{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:4px 0 14px}
+table.mx{border-collapse:collapse;width:100%;font-size:0.92rem}
+@media (max-width: 640px){table.mx{font-size:0.8rem} table.mx th,table.mx td{padding:4px 5px} .rc{font-size:0.9rem}}
+table.mx th,table.mx td{border:1px solid #E1DFD8;padding:5px 8px;text-align:center;white-space:nowrap}
+table.mx th{background:#F6F5F1;font-weight:700}
+table.mx td.sid{font-weight:700}
+table.mx td.mk{font-weight:800;font-size:1.05rem}
+table.mx tr.sum td{background:#FAFAF7;font-size:0.8rem;color:#444}
+</style>
+"""
+
+
+def parse_checks(text: str) -> list:
+    """'주장 ○ / 이유 △' (예전 형식 '주장:잘함'도) → [('주장','○'), ...]"""
+    out = []
+    for part in str(text or "").split("/"):
+        part = part.strip()
+        m = re.match(r"^(.+?)\s*[: ]\s*(○|△|×|잘함|보완|없음)$", part)
+        if m:
+            out.append((m.group(1).strip(), OLD_MARK.get(m.group(2), m.group(2))))
+    return out
+
+
+def parse_improve(text: str) -> list:
+    """시트에 저장된 '고쳐 볼 점' 글을 항목별(무엇을·왜·어떻게…)로 다시 나눕니다."""
+    items = []
+    for line in str(text or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        m = re.match(r"^(\d+)\.\s*(.*)$", line)
+        if m:
+            items.append({})
+            line = m.group(2)
+        if not items:
+            items.append({})
+        t = re.match(r"^\[(무엇을|왜|어떻게|문장 틀|다른 주제 예시)\]\s*(.*)$", line)
+        if t:
+            items[-1][TAGS[t.group(1)]] = t.group(2)
+        else:
+            items[-1]["what"] = (items[-1].get("what", "") + " " + line).strip()
+    return items
+
+
+def chips_html(checks: list) -> str:
+    h = []
+    for name, mk in checks:
+        bg, fg = MARK_STYLE.get(mk, ("#eee", "#333"))
+        h.append(f'<span class="chip" style="background:{bg};color:{fg}">{html.escape(name)} {mk}</span>')
+    return '<div class="chips">' + "".join(h) + "</div>"
+
+
+def mark_summary(checks: list) -> str:
+    """펼치기 제목에 넣을 짧은 요약 (예: ○○△○○× · △1 ×1)"""
+    if not checks:
+        return ""
+    marks = "".join(mk for _, mk in checks)
+    tri, x = marks.count("△"), marks.count("×")
+    tail = " · 모두 ○" if not tri and not x else f" · △{tri} ×{x}"
+    return marks + tail
+
+
+def record_html(r, show_help: bool = True) -> str:
+    e = lambda v: html.escape(str(v or ""))
+    checks = parse_checks(r.get("점검 결과", ""))
+    left = f'<div class="lab">학생 글</div><div class="txt">{e(r.get("학생 글", ""))}</div>'
+    right = '<div class="lab">점검 결과</div>'
+    right += chips_html(checks) if checks else f'<div class="chips">{e(r.get("점검 결과", ""))}</div>'
+    if r.get("잘한 점"):
+        right += f'<div class="box good"><div class="lab">잘한 점</div>{e(r["잘한 점"])}</div>'
+    imps = parse_improve(r.get("고쳐 볼 점", ""))
+    if imps:
+        right += '<div class="box imp"><div class="lab">고쳐 볼 점</div>'
+        for i, p in enumerate(imps[:2]):
+            num = "①②"[i]
+            right += '<div class="ip">'
+            if p.get("why") or p.get("how"):
+                right += (f'<div class="row"><b>{num} 무엇</b><span>{e(p.get("what"))}</span></div>'
+                          f'<div class="row"><b>왜</b><span>{e(p.get("why"))}</span></div>'
+                          f'<div class="row"><b>어떻게</b><span>{e(p.get("how"))}</span></div>')
+                if show_help and (p.get("frame") or p.get("example")):
+                    right += '<div class="help">'
+                    if p.get("frame"):
+                        right += f'도움 1 · 문장 틀: {e(p["frame"])}<br>'
+                    if p.get("example"):
+                        right += f'도움 2 · 다른 주제 예시: {e(p["example"])}'
+                    right += "</div>"
+            else:
+                right += f'<div class="row"><b>{num}</b><span>{e(p.get("what"))}</span></div>'
+            right += "</div>"
+        right += "</div>"
+    if r.get("더 써 볼 점"):
+        right += f'<div class="box add"><div class="lab">더 써 볼 점</div>{e(r["더 써 볼 점"])}</div>'
+    if r.get("생각해 볼 질문"):
+        right += f'<div class="box q"><div class="lab">생각해 볼 질문</div>{e(r["생각해 볼 질문"])}</div>'
+    return f'<div class="rc"><div class="grid"><div>{left}</div><div>{right}</div></div></div>'
+
+
+def matrix_html(view: pd.DataFrame, task_name: str) -> str:
+    """학생별 최신 제출의 점검 결과를 한 표로"""
+    task_key = [k for k, v in TASK_NAMES.items() if v == task_name][0]
+    items = [n for n, _ in CHECK_ITEMS[task_key]]
+    sub = view[view["과제"] == task_name].sort_values("제출 시각").groupby("학번").tail(1).sort_values("학번")
+    if sub.empty:
+        return ""
+    count = {n: {"○": 0, "△": 0, "×": 0} for n in items}
+    rows = []
+    for _, r in sub.iterrows():
+        marks = dict(parse_checks(r.get("점검 결과", "")))
+        tds = []
+        for n in items:
+            mk = marks.get(n, "")
+            if mk in count[n]:
+                count[n][mk] += 1
+            bg, fg = MARK_STYLE.get(mk, ("#fff", "#999"))
+            tds.append(f'<td class="mk" style="background:{bg};color:{fg}">{mk or "-"}</td>')
+        rows.append(f'<tr><td class="sid">{html.escape(str(r["학번"]))}</td>{"".join(tds)}'
+                    f'<td>{html.escape(str(r["제출 시각"])[5:16])}</td></tr>')
+    head = "<tr><th>학번</th>" + "".join(f"<th>{n}</th>" for n in items) + "<th>제출</th></tr>"
+    return f'<div class="mxw"><table class="mx">{head}{"".join(rows)}</table></div>'
+
+
 def teacher_page():
     logout_button()
     st.title("📋 교사용 — 제출 기록")
@@ -728,18 +886,20 @@ def teacher_page():
         st.error("구글 시트를 불러오지 못했어요. Secrets 설정과 시트 공유를 확인해 주세요.")
         st.caption(str(e)[:300])
         return
-
     if df.empty:
         st.info("아직 제출된 글이 없어요.")
         return
+    for col in HEADER:
+        if col not in df.columns:
+            df[col] = ""
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3 = st.columns([2, 2, 1.4])
     with c1:
-        sid = st.text_input("학번으로 찾기 (일부만 써도 돼요)", placeholder="예: 102")
+        sid = st.text_input("학번으로 찾기 (앞자리만 써도 돼요)", placeholder="예: 106 → 1학년 6반")
     with c2:
         task = st.selectbox("과제", ["전체"] + list(TASK_NAMES.values()))
     with c3:
-        latest_only = st.checkbox("학생별 최신 글만", value=False)
+        latest_only = st.checkbox("학생별 최신 글만", value=True)
 
     view = df.copy()
     if sid:
@@ -755,18 +915,26 @@ def teacher_page():
     m2.metric("참여 학생 수", view["학번"].nunique())
     m3.metric("전체 기록", len(df))
 
-    st.dataframe(view[["제출 시각", "학번", "과제", "점검 결과"]],
-                 width="stretch", hide_index=True)
+    st.markdown(RECORD_CSS, unsafe_allow_html=True)
 
-    st.subheader("자세히 보기")
+    st.subheader("한눈에 보기")
+    st.caption("학생별 가장 최근 제출의 점검 결과예요.  ○ 잘했어요 · △ 조금 고쳐요 · × 빠졌어요")
+    shown = False
+    for tname in ([task] if task != "전체" else list(TASK_NAMES.values())):
+        mx = matrix_html(view, tname)
+        if mx:
+            st.markdown(f"**{tname}**")
+            st.markdown(mx, unsafe_allow_html=True)
+            shown = True
+    if not shown:
+        st.caption("조건에 맞는 기록이 없어요.")
+
+    st.subheader("학생별 글과 피드백")
     for _, r in view.head(50).iterrows():
-        with st.expander(f"{r['학번']} · {r['과제']} · {r['제출 시각']}"):
-            st.markdown(f"**학생 글**\n\n{r['학생 글']}")
-            st.markdown(f"**점검 결과** {r['점검 결과']}")
-            st.markdown(f"**잘한 점**\n\n{r['잘한 점']}")
-            st.markdown(f"**고쳐 볼 점**\n\n{r['고쳐 볼 점']}")
-            st.markdown(f"**더 써 볼 점** {r.get('더 써 볼 점', '')}")
-            st.markdown(f"**생각해 볼 질문** {r.get('생각해 볼 질문', '')}")
+        summary = mark_summary(parse_checks(r.get("점검 결과", "")))
+        label = f"{r['학번']} · {r['과제']} · {str(r['제출 시각'])[5:16]}   {summary}"
+        with st.expander(label):
+            st.markdown(record_html(r), unsafe_allow_html=True)
     if len(view) > 50:
         st.caption("최근 50개만 자세히 보여 줍니다. 전체는 아래 파일이나 구글 시트에서 확인하세요.")
 
