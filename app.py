@@ -23,7 +23,7 @@ st.set_page_config(page_title="주장하는 글쓰기 연습 ⑥", page_icon="�
 
 # 먼저 시도할 모델 순서 (앞의 모델이 안 되면 다음 모델 사용)
 # Secrets에 GEMINI_MODEL 을 적으면 그 모델을 가장 먼저 사용합니다.
-DEFAULT_MODELS = ["gemini-flash-latest", "gemini-2.5-flash"]
+DEFAULT_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash-lite"]
 
 MAX_CHARS = 1000        # 학생이 입력할 수 있는 최대 글자 수
 COOLDOWN_SEC = 20       # 피드백을 다시 요청하기까지 기다리는 시간(초)
@@ -286,7 +286,7 @@ def get_feedback(task_key: str, student_text: str) -> dict:
         system_instruction=COMMON_RULES + TASK_PROMPTS[task_key],
         response_mime_type="application/json",
         response_json_schema=feedback_schema(task_key),
-        max_output_tokens=1536,
+        max_output_tokens=4096,
         thinking_config=types.ThinkingConfig(
             thinking_level="low"
         ),
@@ -296,8 +296,11 @@ def get_feedback(task_key: str, student_text: str) -> dict:
     for model in model_candidates():
         model_unavailable = False
         for key_number, key in enumerate(keys, start=1):
-            client = genai.Client(api_key=key)
-            for attempt in range(3):
+            client = genai.Client(
+                api_key=key,
+                http_options=types.HttpOptions(timeout=30000),
+            )
+            for attempt in range(1):
                 try:
                     response = client.models.generate_content(
                         model=model,
@@ -320,14 +323,17 @@ def get_feedback(task_key: str, student_text: str) -> dict:
                         break  # 할당량이 남은 다음 키로 전환
 
                     if any(token in message for token in
-                           ("500", "502", "503", "504", "overloaded", "unavailable")):
-                        if attempt < 2:
-                            time.sleep(2 ** attempt)
-                            continue
+                           ("500", "502", "503", "504", "overloaded", "unavailable",
+                            "high demand", "timeout", "timed out")):
+                        # 서버 과부하와 시간 초과는 키 문제가 아니므로
+                        # 다른 키를 반복하지 않고 다음 모델로 전환합니다.
+                        model_unavailable = True
                         break
 
-                    if isinstance(exc, (json.JSONDecodeError, ValueError)) and attempt < 2:
-                        continue
+                    if isinstance(exc, (json.JSONDecodeError, ValueError)):
+                        # 응답 형식 문제도 키를 바꿔 해결되지 않으므로 다음 모델로 이동합니다.
+                        model_unavailable = True
+                        break
 
                     break  # 인증 오류 등은 다음 키로 전환
 
@@ -669,3 +675,4 @@ elif role == "teacher":
     teacher_page()
 else:
     login_page()
+
