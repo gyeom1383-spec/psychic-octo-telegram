@@ -520,8 +520,8 @@ def logout_button():
 FEEDBACK_CSS = """
 <style>
 table.fbt{width:100%;border-collapse:collapse;font-size:0.95rem;margin-bottom:0.6rem}
-table.fbt th,table.fbt td{border:1px solid #ddd;padding:6px 8px;vertical-align:middle;text-align:left}
-table.fbt th{background:#f6f6f6}
+table.fbt th,table.fbt td{border:1px solid #ddd;padding:6px 8px;vertical-align:middle;text-align:left;background:#fff;color:#1b1b1b}
+table.fbt th{background:#f6f6f6;color:#1b1b1b}
 table.fbt td.mk,table.fbt th.mk{white-space:nowrap;text-align:center;width:3.2em;font-weight:700;font-size:1.1rem}
 table.fbt td.it{width:42%}
 </style>
@@ -741,10 +741,11 @@ RECORD_CSS = """
 .rc .grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:18px}
 @media (max-width: 900px){.rc .grid{grid-template-columns:1fr}}
 .rc .lab{font-size:0.78rem;font-weight:700;color:#666;letter-spacing:.02em;margin:0 0 4px}
-.rc .txt{background:#FAFAF7;border:1px solid #E4E2DA;border-radius:10px;padding:12px 14px;white-space:pre-wrap}
+.rc .txt{background:#FAFAF7;color:#1b1b1b;border:1px solid #E4E2DA;border-radius:10px;padding:12px 14px;white-space:pre-wrap}
 .rc .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
 .rc .chip{border-radius:99px;padding:2px 10px;font-size:0.85rem;font-weight:700;white-space:nowrap}
-.rc .box{border-radius:10px;padding:9px 13px;margin-bottom:10px}
+.rc .box{border-radius:10px;padding:9px 13px;margin-bottom:10px;color:#1b1b1b}
+.rc .box .lab{color:#555}
 .rc .good{background:#E6F4EA;border-left:5px solid #1E7B34}
 .rc .imp{background:#FFFBEA;border-left:5px solid #E0A800}
 .rc .add{background:#EAF2FF;border-left:5px solid #2B5FD9}
@@ -752,12 +753,12 @@ RECORD_CSS = """
 .rc .ip + .ip{border-top:1px dashed #E5CF80;padding-top:7px;margin-top:7px}
 .rc .row{display:grid;grid-template-columns:3.6em 1fr;gap:6px}
 .rc .row b{color:#7A5B00}
-.rc .help{font-size:0.82rem;color:#666}
+.rc .help{font-size:0.82rem;color:#555}
 .mxw{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:4px 0 14px}
 table.mx{border-collapse:collapse;width:100%;font-size:0.92rem}
 @media (max-width: 640px){table.mx{font-size:0.8rem} table.mx th,table.mx td{padding:4px 5px} .rc{font-size:0.9rem}}
-table.mx th,table.mx td{border:1px solid #E1DFD8;padding:5px 8px;text-align:center;white-space:nowrap}
-table.mx th{background:#F6F5F1;font-weight:700}
+table.mx th,table.mx td{border:1px solid #E1DFD8;padding:5px 8px;text-align:center;white-space:nowrap;background:#fff;color:#1b1b1b}
+table.mx th{background:#F6F5F1;color:#1b1b1b;font-weight:700}
 table.mx td.sid{font-weight:700}
 table.mx td.mk{font-weight:800;font-size:1.05rem}
 table.mx tr.sum td{background:#FAFAF7;font-size:0.8rem;color:#444}
