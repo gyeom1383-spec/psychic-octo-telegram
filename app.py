@@ -100,12 +100,23 @@ COMMON_RULES = f"""
    - mark: ○(잘했어요) / △(있지만 조금 고쳐요) / ×(빠졌어요) 중 하나.
    - comment: 해요체 한 문장, 30자 안팎. 왜 그 표시를 했는지 쉽게 말한다.
 2. good_point: 가장 잘한 점 한 문장(45자 이내). 학생 글의 표현을 짧게 인용해도 좋다.
-3. improve_points: 고쳐 볼 점 정확히 두 문장(각 50자 이내). 가장 중요한 것부터 쓴다.
-   - 이미 쓴 내용 가운데 '틀렸거나 부족한 곳'을 고치는 일이다.
-   - 반드시 "어디를(학생 글의 낱말이나 문장을 따옴표로 인용) + 어떻게(무엇을 하면 되는지)"를 함께 쓰고, "~해 보세요."로 끝낸다.
-   - 고칠 것이 하나뿐이면 두 번째는 다른 부분을 더 분명하게 다듬는 방법을 쓴다.
-4. add_point: 더 써 볼 점 한 문장(50자 이내).
+3. improve_points: 고쳐 볼 점 정확히 두 개. 가장 중요한 것부터 쓴다. 각각 아래 다섯 칸을 모두 채운다.
+   이 피드백만 읽고도 모든 학생이 스스로 고칠 수 있어야 한다(완전학습). 그래서 '무엇을, 왜, 어떻게'를 빠짐없이 쓴다.
+   - what(무엇을, 40자 이내): 고칠 곳. 학생 글의 낱말이나 문장을 따옴표로 그대로 인용하고 무엇이 문제인지 말한다.
+       예: "'많은 학생들이 쉴 시간이 없다고 했다'에 숫자가 없어요."
+   - why(왜, 45자 이내): 그렇게 고치면 글이 왜 더 좋아지는지, 읽는 사람 입장에서 말한다.
+       예: "'많은'은 사람마다 다르게 생각해서, 숫자가 있어야 믿을 수 있어요."
+   - how(어떻게, 50자 이내): 학생이 바로 할 수 있는 행동 하나. 어디를 보고(자료 번호와 내용), 무엇을 넣거나 빼는지 쓴다. "~해 보세요."로 끝낸다.
+       예: "학생회 설문(자료 1)에서 몇 %가 그렇게 답했는지 찾아 그 숫자를 넣어 보세요."
+   - frame(문장 틀, 50자 이내): 혼자 고치기 어려운 학생을 위한 1단계 도움. 빈칸 ( )이 있는 문장 틀을 준다.
+       내용을 채워 주지 말고, 학생이 자료를 보고 채울 자리를 ( )로 비운다.
+       예: "( )에 따르면, 학생의 ( )%가 ( )고 답했다."
+   - example(다른 주제 예시, 70자 이내): 2단계 도움. 같은 방법을 '전혀 다른 주제'(예: 도서관, 급식, 체육 시간)로 보여 준다.
+       학생 글에 그대로 베껴 쓸 수 없도록 연습 주제(쉬는 시간)와 자료 내용은 절대 쓰지 않는다. 수치와 기관은 지어낸 것임을 '(가상)'으로 밝힌다.
+       예: "고치기 전: 많은 학생이 도서관이 좁다고 했다. → 고친 후: 도서부 설문(가상)에 따르면 학생의 62%가 도서관이 좁다고 답했다."
+4. add_point: 더 써 볼 점 한두 문장(70자 이내). '무엇을' 덧붙이고 '왜' 좋은지를 함께 쓴다.
    - 지금 글에 '없는 내용' 가운데 덧붙이면 글이 더 설득력 있어지는 것 하나를 고른다.
+   - 어디에(어느 문장 뒤에) 넣으면 좋은지도 알려 준다.
      (예: 근거를 풀어 설명하는 문장, 근거를 하나 더 들기, 근거에 숫자나 예를 더하기)
    - "~을/를 덧붙여 보세요."처럼 쓴다. 덧붙일 문장을 대신 써 주지는 않는다.
 5. question: 생각해 볼 질문 한 문장(50자 이내, 물음표로 끝냄).
@@ -193,7 +204,20 @@ def feedback_schema(task_key: str) -> dict:
                 },
             },
             "good_point": {"type": "string"},
-            "improve_points": {"type": "array", "items": {"type": "string"}},
+            "improve_points": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "what": {"type": "string"},
+                        "why": {"type": "string"},
+                        "how": {"type": "string"},
+                        "frame": {"type": "string"},
+                        "example": {"type": "string"},
+                    },
+                    "required": ["what", "why", "how", "frame", "example"],
+                },
+            },
             "add_point": {"type": "string"},
             "question": {"type": "string"},
         },
@@ -273,9 +297,16 @@ def _parse_feedback_response(response, task_key: str) -> dict:
         checks.append(by_name[name])
 
     good = str(parsed.get("good_point", "")).strip()
-    improve = [str(p).strip() for p in (parsed.get("improve_points") or []) if str(p).strip()]
+    improve = []
+    for p in parsed.get("improve_points") or []:
+        if isinstance(p, dict):
+            item = {k: str(p.get(k, "")).strip() for k in ("what", "why", "how", "frame", "example")}
+            if item["what"] and item["why"] and item["how"]:
+                improve.append(item)
+        elif str(p).strip():   # 예전 형식(문장 하나)도 받아 줍니다.
+            improve.append({"what": str(p).strip(), "why": "", "how": "", "frame": "", "example": ""})
     if not good or len(improve) < 2:
-        raise ValueError("AI 응답의 잘한 점 또는 고쳐 볼 점 개수가 맞지 않습니다.")
+        raise ValueError("AI 응답의 잘한 점 또는 고쳐 볼 점(무엇을·왜·어떻게)이 부족합니다.")
 
     add = str(parsed.get("add_point", "")).strip()
     question = str(parsed.get("question", "")).strip()
@@ -382,6 +413,18 @@ def get_worksheet():
     return ws
 
 
+def improve_text(n: int, p) -> str:
+    """고쳐 볼 점을 시트에 저장할 한 덩어리 글로 만듭니다."""
+    if isinstance(p, str):
+        return f"{n}. {p}"
+    lines = [f"{n}. [무엇을] {p.get('what', '')}"]
+    if p.get("why"): lines.append(f"   [왜] {p['why']}")
+    if p.get("how"): lines.append(f"   [어떻게] {p['how']}")
+    if p.get("frame"): lines.append(f"   [문장 틀] {p['frame']}")
+    if p.get("example"): lines.append(f"   [다른 주제 예시] {p['example']}")
+    return "\n".join(lines)
+
+
 def save_record(student_id: str, task_key: str, text: str, fb: dict):
     checks = " / ".join(f"{c.get('item')} {c.get('mark')}" for c in fb.get("checks", []))
     row = [
@@ -392,7 +435,7 @@ def save_record(student_id: str, task_key: str, text: str, fb: dict):
         text,
         checks if fb.get("on_topic", True) else "다시 쓰기 안내",
         fb.get("good_point", ""),
-        "\n".join(f"{n}. {p}" for n, p in enumerate(fb.get("improve_points", []), 1)),
+        "\n".join(improve_text(n, p) for n, p in enumerate(fb.get("improve_points", []), 1)),
         fb.get("add_point", ""),
         fb.get("question", ""),
     ]
@@ -470,7 +513,8 @@ def show_feedback(task_key: str, fb: dict):
     """학습지 ⑥의 'AI 피드백 정리' 칸과 같은 순서·형식으로 보여 줍니다."""
     if not fb.get("on_topic", True):
         st.warning("과제와 관련된 글을 다시 써 볼까요?\n\n"
-                   + "\n\n".join(fb.get("improve_points", [])))
+                   + "\n\n".join(p["what"] if isinstance(p, dict) else str(p)
+                                   for p in fb.get("improve_points", [])))
         return
     st.subheader("AI 피드백")
     st.caption("학습지의 ‘AI 피드백 정리’ 칸에 순서대로 옮겨 적으세요.  "
@@ -487,8 +531,26 @@ def show_feedback(task_key: str, fb: dict):
     st.markdown(FEEDBACK_CSS + "".join(rows), unsafe_allow_html=True)
 
     st.success(f"**잘한 점**  \n{fb.get('good_point', '')}")
-    improve = fb.get("improve_points", [])
-    st.warning("**고쳐 볼 점**  \n" + "  \n".join(f"{'①②'[i]} {p}" for i, p in enumerate(improve[:2])))
+    st.markdown("**고쳐 볼 점**  \n"
+                "<small>학습지에는 ‘무엇을’과 ‘어떻게’를 옮겨 적어요. "
+                "혼자 고치기 어려우면 아래 ‘도움 받기’를 차례로 열어 보세요.</small>",
+                unsafe_allow_html=True)
+    for i, p in enumerate(fb.get("improve_points", [])[:2]):
+        num = "①②"[i]
+        with st.container(border=True):
+            if isinstance(p, str):
+                st.markdown(f"{num} {p}")
+                continue
+            st.markdown(f"**{num} 무엇을** {p.get('what', '')}  \n"
+                        f"**왜** {p.get('why', '')}  \n"
+                        f"**어떻게** {p.get('how', '')}")
+            if p.get("frame"):
+                with st.expander(f"🙋 {num} 도움 받기 1단계 — 문장 틀"):
+                    st.markdown(f"빈칸 ( )을 자료를 보고 채워 보세요.\n\n> {p['frame']}")
+            if p.get("example"):
+                with st.expander(f"🙋 {num} 도움 받기 2단계 — 다른 주제로 본 예시"):
+                    st.markdown("주제는 다르지만 고치는 방법은 같아요. 방법만 따라 해 보세요.\n\n"
+                                f"> {p['example']}")
     if fb.get("add_point"):
         st.info(f"**더 써 볼 점**  \n{fb['add_point']}")
     if fb.get("question"):
