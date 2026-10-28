@@ -588,12 +588,16 @@ def show_feedback(task_key: str, fb: dict):
                "○ 잘했어요 · △ 조금 고쳐요 · × 빠졌어요")
 
     questions = dict(CHECK_ITEMS[task_key])
-    rows = ['<table class="fbt"><tr><th>점검 항목</th><th class="mk">결과</th><th>까닭</th></tr>']
-    for c in fb.get("checks", []):
+    checks = fb.get("checks", [])
+    # 예전 기록처럼 까닭이 저장되지 않은 경우에는 '까닭' 칸을 아예 빼고 보여 줍니다.
+    has_comment = any(c.get("comment") for c in checks)
+    head = '<th>까닭</th>' if has_comment else ''
+    rows = [f'<table class="fbt"><tr><th>점검 항목</th><th class="mk">결과</th>{head}</tr>']
+    for c in checks:
+        tail = f'<td>{html.escape(c.get("comment") or "-")}</td>' if has_comment else ''
         rows.append(f'<tr><td class="it"><b>{html.escape(c["item"])}</b> '
                     f'{html.escape(questions.get(c["item"], ""))}</td>'
-                    f'<td class="mk">{html.escape(c["mark"])}</td>'
-                    f'<td>{html.escape(c.get("comment") or "-")}</td></tr>')
+                    f'<td class="mk">{html.escape(c["mark"])}</td>{tail}</tr>')
     rows.append("</table>")
     st.markdown(FEEDBACK_CSS + "".join(rows), unsafe_allow_html=True)
 
