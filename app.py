@@ -31,7 +31,7 @@ COOLDOWN_SEC = 20       # 피드백을 다시 요청하기까지 기다리는 �
 SHEET_TAB = "기록"       # 구글 시트에서 기록을 저장할 탭 이름
 # ※ '사용 자료' 열은 예전 기록과 열 위치를 맞추려고 남겨 두었습니다(이제는 비워서 저장).
 HEADER = ["제출 시각", "학번", "과제", "사용 자료", "학생 글",
-          "점검 결과", "잘한 점", "고쳐 볼 점", "더 써 볼 점", "생각해 볼 질문"]
+          "점검 결과", "잘한 점", "고쳐 볼 점", "더 써 볼 점", "생각해 볼 질문", "점검 까닭"]
 KST = ZoneInfo("Asia/Seoul")
 
 TOPIC = "쉬는 시간을 10분에서 15분으로 늘려야 한다."
@@ -442,6 +442,7 @@ def save_record(student_id: str, task_key: str, text: str, fb: dict):
         "\n".join(improve_text(n, p) for n, p in enumerate(fb.get("improve_points", []), 1)),
         fb.get("add_point", ""),
         fb.get("question", ""),
+        "\n".join(f"{c.get('item')}: {c.get('comment', '')}" for c in fb.get("checks", [])),
     ]
     # table_range="A1": 구글 시트가 '표의 끝'을 잘못 찾아 한 칸 오른쪽에 붙이는 일을 막습니다.
     get_worksheet().append_row(row, value_input_option="RAW", table_range="A1")
@@ -471,6 +472,52 @@ def load_records() -> pd.DataFrame:
     df["학번"] = df["학번"].astype(str)
     return df
 
+def restore_from_sheet(sid: str):
+    """다시 들어온 학생에게 과제별로 가장 최근에 제출한 글과 피드백을 되살려 줍니다."""
+    try:
+        load_records.clear()
+        df = load_records()
+    except Exception as e:
+        print("기록 불러오기 오류", repr(e), flush=True)
+        return
+    if df.empty or "학번" not in df.columns:
+        return
+    mine = df[df["학번"] == sid]
+    restored = []
+    for task_key, task_name in TASK_NAMES.items():
+        sub = mine[mine["과제"] == task_name]
+        if sub.empty:
+            continue
+        r = sub.sort_values("제출 시각").iloc[-1]
+        text = str(r.get("학생 글", ""))
+        st.session_state[f"{task_key}_text"] = text
+        st.session_state[f"{task_key}_draft"] = text
+        comments = {}
+        for line in str(r.get("점검 까닭", "") or "").splitlines():
+            if ":" in line:
+                k, v = line.split(":", 1)
+                comments[k.strip()] = v.strip()
+        checks = [{"item": n, "mark": m, "comment": comments.get(n, "")}
+                  for n, m in parse_checks(r.get("점검 결과", ""))]
+        improve = []
+        for p in parse_improve(r.get("고쳐 볼 점", "")):
+            item = {k: p.get(k, "") for k in ("what", "why", "how", "frame", "example")}
+            improve.append(item if (item["why"] or item["how"]) else item["what"])
+        st.session_state[f"{task_key}_fb"] = {
+            "on_topic": str(r.get("점검 결과", "")) != "다시 쓰기 안내",
+            "checks": checks,
+            "good_point": str(r.get("잘한 점", "")),
+            "improve_points": improve,
+            "add_point": str(r.get("더 써 볼 점", "")),
+            "question": str(r.get("생각해 볼 질문", "")),
+        }
+        restored.append(f"{task_name}({str(r.get('제출 시각', ''))[5:16]})")
+    if restored:
+        st.session_state["restored_msg"] = (
+            "지난번에 제출한 글과 피드백을 불러왔어요: " + ", ".join(restored)
+            + "  이어서 고쳐 쓰고 다시 피드백을 받아 보세요.")
+
+
 # ─────────────────────────────────────────────
 # 5. 로그인 화면
 # ─────────────────────────────────────────────
@@ -489,6 +536,7 @@ def login_page():
                 st.error("학번은 숫자 5자리로 입력해 주세요. 예: 1학년 2반 3번 → 10203")
             else:
                 st.session_state.update(role="student", sid=sid)
+                restore_from_sheet(sid)   # 지난번에 쓴 글과 피드백 불러오기
                 st.rerun()
 
     with tab_t:
@@ -545,7 +593,7 @@ def show_feedback(task_key: str, fb: dict):
         rows.append(f'<tr><td class="it"><b>{html.escape(c["item"])}</b> '
                     f'{html.escape(questions.get(c["item"], ""))}</td>'
                     f'<td class="mk">{html.escape(c["mark"])}</td>'
-                    f'<td>{html.escape(c["comment"])}</td></tr>')
+                    f'<td>{html.escape(c.get("comment") or "-")}</td></tr>')
     rows.append("</table>")
     st.markdown(FEEDBACK_CSS + "".join(rows), unsafe_allow_html=True)
 
@@ -687,6 +735,8 @@ def student_page():
     st.title("✏️ 주장하는 글쓰기 연습 ⑥")
     st.caption(f"학번 {st.session_state['sid']} · 한 문단 쓰기와 반론 다루기")
     st.info(f"**연습 주제(찬성 입장)** — {TOPIC}")
+    if st.session_state.get("restored_msg"):
+        st.success(st.session_state["restored_msg"])
     st.caption("※ 글에는 이름 등 개인 정보를 쓰지 마세요. 피드백은 AI가 만든 것이라 틀릴 수 있어요. "
                "내가 쓴 글과 피드백은 선생님이 볼 수 있도록 저장돼요.")
 
