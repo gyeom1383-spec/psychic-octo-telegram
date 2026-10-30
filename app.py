@@ -8,11 +8,13 @@ import json
 import re
 import time
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import gspread
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 from google import genai
 from google.genai import types
 
@@ -734,6 +736,24 @@ def writing_area(task_key: str, placeholder: str):
         show_feedback(task_key, st.session_state[f"{task_key}_fb"])
 
 
+GUIDE_DIR = Path(__file__).parent / "help"
+
+
+def show_guide(filename: str, label: str):
+    """help 폴더의 HTML 도움자료를 펼쳐 보기 + 내려받기로 보여 줍니다."""
+    path = GUIDE_DIR / filename
+    if not path.exists():
+        return
+    page = path.read_text(encoding="utf-8")
+    with st.expander(label):
+        if hasattr(st, "iframe"):  # Streamlit 1.5x 이후
+            st.iframe(path, height=900)
+        else:
+            components.html(page, height=900, scrolling=True)
+        st.download_button("⬇️ 도움자료 내려받기 (인쇄용)", data=page.encode("utf-8"),
+                           file_name=filename, mime="text/html", key=f"dl_{filename}")
+
+
 def student_page():
     logout_button()
     st.title("✏️ 주장하는 글쓰기 연습 ⑥")
@@ -755,10 +775,12 @@ def student_page():
 |---|---|
 | 주장 문장 | 쉬는 시간을 10분에서 15분으로 늘려야 한다. |
 | 이유 | 첫째, (이유) ~기 때문이다. |
-| 근거 | 예를 들어 / ~에 따르면, (자료의 내용 + 출처) |
-| 마무리 | 따라서 (주장을 다시 한 번 정리) |
+| 근거 | ~에 따르면, (자료의 내용 + 출처) |
+| 근거 풀이 | 이는 ~라는 뜻이다. (자료가 무엇을 뜻하는지 풀어 쓰기) |
+| 마무리 | 따라서 / 그러므로 (문단 정리) |
 """)
-        writing_area("para", "주장 → 이유 → 근거(출처) → 마무리 순서로 한 문단을 써 보세요.")
+        show_guide("para_guide.html", "📘 도움자료: 한 문단 쓰기 (근거를 풀어 쓰는 방법)")
+        writing_area("para", "주장 → 이유 → 근거(출처) → 근거 풀이 → 마무리 순서로 한 문단을 써 보세요.")
     with tab2:
         st.markdown("**반론** 내 주장에 반대하는 사람이 할 법한 말  \n"
                     "**재반박** 반론을 인정하더라도 그래도 내 주장이 옳은 까닭(해결 방법, 더 중요한 이유)")
